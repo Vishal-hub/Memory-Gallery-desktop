@@ -1107,12 +1107,12 @@
     state.groupBy = nextGroupBy;
     state.personFilter = null;
 
-    // Sync visual dropdown
+    // Sync visual dropdown if it exists
     if (ui.groupBySelect) {
       const trigger = ui.groupBySelect.querySelector('.dropdown-trigger');
       const label = trigger.querySelector('.dropdown-label');
       const item = ui.groupBySelect.querySelector(`.dropdown-item[data-value="${nextGroupBy}"]`);
-      if (item) {
+      if (item && label) {
         ui.groupBySelect.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
         item.classList.add('active');
         label.innerText = item.innerText;
@@ -1502,6 +1502,7 @@
     function setupCustomDropdown(el, onChange) {
       if (!el) return;
       const trigger = el.querySelector('.dropdown-trigger');
+      const labelEl = trigger.querySelector('.dropdown-label');
       const menu = el.querySelector('.dropdown-menu');
       const items = el.querySelectorAll('.dropdown-item');
 
@@ -1522,6 +1523,12 @@
         item.onclick = (e) => {
           e.stopPropagation();
           const val = item.getAttribute('data-value');
+
+          // VISUAL SYNC
+          items.forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          if (labelEl) labelEl.innerText = item.innerText;
+
           onChange(val);
           menu.classList.remove('show');
           trigger.classList.remove('open');
@@ -1530,9 +1537,7 @@
     }
 
     setupCustomDropdown(ui.groupBySelect, (val) => {
-      state.groupBy = val;
-      state.personFilter = null;
-      refreshViewMode();
+      switchGroupBy(val);
     });
 
     setupCustomDropdown(ui.mapStyleSelect, (val) => {
