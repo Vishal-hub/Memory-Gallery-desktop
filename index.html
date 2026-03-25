@@ -86,20 +86,32 @@
 
         <div class="map-mode-wrap hidden" id="mapModeWrap">
           <div class="map-mode-meta" id="mapModeMeta">0 places · 0 items</div>
-          <select id="mapStyleSelect" class="filter-chip map-style-select">
-            <option value="voyager">Voyager</option>
-            <option value="positron">Positron</option>
-            <option value="darkmatter">Dark Matter</option>
-          </select>
+          <div class="custom-dropdown" id="mapStyleDropdown">
+            <div class="dropdown-trigger">
+              <span class="dropdown-label">Voyager</span>
+              <i class="dropdown-arrow">▾</i>
+            </div>
+            <div class="dropdown-menu">
+              <div class="dropdown-item active" data-value="voyager">Voyager</div>
+              <div class="dropdown-item" data-value="positron">Positron</div>
+              <div class="dropdown-item" data-value="darkmatter">Dark Matter</div>
+            </div>
+          </div>
         </div>
 
         <div class="groupBy-wrap">
-          <select id="groupBySelect" class="filter-chip" style="font-size: 0.75rem; padding: 4px 24px 4px 12px;">
-            <option value="date">⏱ Chrono</option>
-            <option value="tag">◈ Subjects</option>
-            <option value="person">⊚ Identities</option>
-            <option value="location">📍 Places</option>
-          </select>
+          <div class="custom-dropdown" id="groupByDropdown">
+            <div class="dropdown-trigger">
+              <span class="dropdown-label">⏱ Chrono</span>
+              <i class="dropdown-arrow">▾</i>
+            </div>
+            <div class="dropdown-menu">
+              <div class="dropdown-item active" data-value="date">⏱ Chrono</div>
+              <div class="dropdown-item" data-value="tag">◈ Subjects</div>
+              <div class="dropdown-item" data-value="person">⊚ Identities</div>
+              <div class="dropdown-item" data-value="location">📍 Places</div>
+            </div>
+          </div>
         </div>
 
         <div class="ui-filters">
@@ -133,7 +145,7 @@
         </div>
         <div id="map-panel" class="hidden">
           <div id="map"></div>
-          <button id="fitMapBtn" class="floating-btn" type="button">🎯 Fit Memories</button>
+          <button id="fitMapBtn" class="floating-btn" type="button">🎯 Recenter</button>
         </div>
       </div>
     </main>

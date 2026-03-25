@@ -46,6 +46,8 @@
     people: [],
     personFilter: null,
     libraryDirty: false,
+    navigationToken: 0,
+    dragStartLng: null,
   };
 
   const ui = {
@@ -71,12 +73,12 @@
     filterGroupBtn: document.getElementById('filterGroupBtn'),
     floatingRecenterBtn: document.getElementById('floatingRecenterBtn'),
     clearCacheActionBtn: document.getElementById('clearCacheActionBtn'),
-    groupBySelect: document.getElementById('groupBySelect'),
+    groupBySelect: document.getElementById('groupByDropdown'),
     mapPanel: document.getElementById('map-panel'),
     mapModeWrap: document.getElementById('mapModeWrap'),
     mapModeMeta: document.getElementById('mapModeMeta'),
     fitMapBtn: document.getElementById('fitMapBtn'),
-    mapStyleSelect: document.getElementById('mapStyleSelect'),
+    mapStyleSelect: document.getElementById('mapStyleDropdown'),
     navTimeline: document.getElementById('navTimeline'),
     navPeople: document.getElementById('navPeople'),
     navMap: document.getElementById('navMap'),
@@ -136,24 +138,44 @@
   }
 
   function setTransform() {
+    if (state.inDetailsView) {
+      if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
+    } else {
+      const movedX = Math.abs(state.offsetX - state.idealOffsetX) > 8;
+      const movedY = Math.abs(state.offsetY - state.idealOffsetY) > 8;
+      const zoomed = Math.abs(state.scale - 1.0) > 0.02;
+
+      const isOffCenter = movedX || movedY || zoomed;
+
+      if (ui.floatingRecenterBtn) {
+        ui.floatingRecenterBtn.classList.toggle('hidden', !isOffCenter);
+      }
+    }
+
     const transform = `translate(${state.offsetX}px, ${state.offsetY}px) scale(${state.scale})`;
     ui.gallery.style.transform = transform;
     ui.connections.style.transform = transform;
 
-    // DYNAMIC RECENTER BUTTON VISIBILITY
-    const isOffCenter = Math.abs(state.scale - 1.0) > 0.05 || Math.abs(state.offsetX - state.idealOffsetX) > 200;
-    if (ui.floatingRecenterBtn) {
-      ui.floatingRecenterBtn.classList.toggle('hidden', !isOffCenter);
-    }
-
-    // DYNAMIC LAYOUT MORPHING (Google Earth style)
-    // ZOOM OUT MORPH (Circle Planet)
-    // starts at 0.75, fully formed at 0.18
     const outThreshold = 0.75;
     const outEnd = 0.18;
     const morphFactor = Math.max(0, Math.min(1, (outThreshold - state.scale) / (outThreshold - outEnd)));
 
     updateMorphedLayout(morphFactor);
+  }
+
+  function resetViewportContext() {
+    state.inDetailsView = false;
+    state.openedFromMap = false;
+    state.openedFromPeople = false;
+    if (ui.viewport) {
+      ui.viewport.classList.remove('scrollable-mode');
+      ui.viewport.style.overflow = 'hidden';
+      ui.viewport.style.cursor = 'grab';
+    }
+    if (ui.gallery) {
+      ui.gallery.style.position = 'absolute';
+      ui.gallery.style.height = '100%';
+    }
   }
 
   function updateMorphedLayout(morphFactor) {
@@ -271,7 +293,7 @@
 
     // 1. FORCE SCALE TO 1.0 (no morph at this scale)
     state.scale = 1.0;
-
+    state.idealScale = 1; // ✅ IMPORTANT
     // 2. RESET ALL NODES TO PURE WAVE POSITIONS
     positions.forEach((pos, i) => {
       const waveX = GRAPH.startX + i * GRAPH.gapX;
@@ -320,34 +342,90 @@
     redrawConnections(positions);
   }
 
-  function showLightbox(src, altText = 'Photo preview') {
+  function showLightbox(items, startIndex = 0) {
+    if (!items || items.length === 0) return;
+    let currentIndex = startIndex;
+
     const overlay = document.createElement('div');
     overlay.className = 'lightbox';
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'close';
-    closeBtn.innerText = 'x';
+    closeBtn.innerHTML = '&times;';
 
     const img = document.createElement('img');
-    img.src = src;
-    img.alt = altText;
+    const counter = document.createElement('div');
+    counter.className = 'lightbox-counter';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'lightbox-nav prev';
+    prevBtn.innerHTML = '&#10094;';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'lightbox-nav next';
+    nextBtn.innerHTML = '&#10095;';
+
+    function updateContent() {
+      const item = items[currentIndex];
+      img.src = toFileSrc(item.path);
+      img.alt = item.placeName || 'Photo preview';
+      counter.innerText = `${currentIndex + 1} / ${items.length}`;
+
+      // Hide nav buttons if only one image
+      prevBtn.style.display = items.length > 1 ? 'block' : 'none';
+      nextBtn.style.display = items.length > 1 ? 'block' : 'none';
+    }
+
+    function showPrev(e) {
+      if (e) e.stopPropagation();
+      currentIndex = (currentIndex - 1 + items.length) % items.length;
+      updateContent();
+    }
+
+    function showNext(e) {
+      if (e) e.stopPropagation();
+      currentIndex = (currentIndex + 1) % items.length;
+      updateContent();
+    }
 
     function close() {
       overlay.remove();
-      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('keydown', handleKeys);
     }
-    function handleEsc(e) {
-      if (e.key === 'Escape') close();
+
+    function handleKeys(e) {
+      if (e.key === 'Escape' || e.key === 'Backspace') close();
+      if (e.key === 'ArrowLeft') showPrev();
+      if (e.key === 'ArrowRight') showNext();
     }
 
     closeBtn.onclick = close;
+    prevBtn.onclick = showPrev;
+    nextBtn.onclick = showNext;
+
+    // Clicking left/right side of the overlay to navigate
     overlay.onclick = (e) => {
-      if (e.target === overlay) close();
+      if (e.target === overlay) {
+        close();
+        return;
+      }
+      const rect = overlay.getBoundingClientRect();
+      if (e.clientX < rect.width / 3) {
+        showPrev();
+      } else if (e.clientX > (rect.width * 2) / 3) {
+        showNext();
+      }
     };
+
+    updateContent();
+
     overlay.appendChild(closeBtn);
+    overlay.appendChild(prevBtn);
+    overlay.appendChild(nextBtn);
     overlay.appendChild(img);
+    overlay.appendChild(counter);
     document.body.appendChild(overlay);
-    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('keydown', handleKeys);
   }
 
   function getRelatedClusters(currentEventId) {
@@ -418,7 +496,14 @@
     state.mapTileLayer = L.tileLayer(style.url, style.options).addTo(state.map);
     state.currentMapStyle = styleKey;
     if (ui.mapStyleSelect) {
-      ui.mapStyleSelect.value = styleKey;
+      const trigger = ui.mapStyleSelect.querySelector('.dropdown-trigger');
+      const label = trigger.querySelector('.dropdown-label');
+      const item = ui.mapStyleSelect.querySelector(`.dropdown-item[data-value="${styleKey}"]`);
+      if (item) {
+        ui.mapStyleSelect.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        label.innerText = item.innerText;
+      }
     }
   }
 
@@ -487,14 +572,28 @@
       }).addTo(state.map);
       setMapStyle(state.currentMapStyle);
       L.control.zoom({ position: 'topright' }).addTo(state.map);
-      state.map.on('move', () => {
-        if (state.syncingMapLatitude || typeof state.mapLockedLat !== 'number') return;
-        if (state.map.getZoom() > MAP_MIN_ZOOM + 0.5) return;
-        const center = state.map.getCenter();
-        if (Math.abs(center.lat - state.mapLockedLat) < 0.0001) return;
-        state.syncingMapLatitude = true;
-        state.map.panTo([state.mapLockedLat, center.lng], { animate: false });
-        state.syncingMapLatitude = false;
+      // Axis-Constrained Interactions
+      // 1. Horizontal Scroll-to-Pan (matching timeline scrub)
+      const mapContainer = state.map.getContainer();
+      mapContainer.addEventListener('wheel', (e) => {
+        // If horizontal scroll is dominant, pan map horizontally
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+          state.map.panBy([e.deltaX, 0], { animate: false });
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, { capture: true, passive: false });
+
+      // 2. Vertical-Only Dragging
+      state.map.on('dragstart', () => {
+        state.dragStartLng = state.map.getCenter().lng;
+      });
+      state.map.on('drag', () => {
+        if (typeof state.dragStartLng === 'number') {
+          const center = state.map.getCenter();
+          // Force longitude to stay fixed during drag, allow latitude change
+          state.map.setView([center.lat, state.dragStartLng], state.map.getZoom(), { animate: false });
+        }
       });
       // Show Fit Memories button whenever user pans/zooms manually
       state.map.on('movestart', () => {
@@ -688,42 +787,68 @@
     updateMapMarkers(clusters, options);
   }
 
+  async function handleBackNavigation() {
+    if (!state.inDetailsView) return;
+
+    // Check if there's a specific back-action attribute, or use current flags
+    const backBtn = document.querySelector('.back-nav');
+    const action = backBtn ? backBtn.getAttribute('data-back-action') :
+      (state.openedFromMap ? 'map' : (state.openedFromPeople ? 'people' : 'timeline'));
+
+    console.log('[Nav] Back navigation triggered, action=', action);
+
+    if (action === 'people') {
+      resetViewportContext();
+      ui.navPeople.click();
+    } else if (action === 'map') {
+      resetViewportContext();
+      setMapVisibility(true);
+      setTimeout(() => setTransform(), 0);
+    } else {
+      resetViewportContext();
+      renderClusters(state.filteredClusters);
+      setTransform();
+    }
+  }
+
   function openCluster(eventId) {
     const cluster = state.filteredClusters.find((c) => c.id === eventId);
     if (!cluster) return;
 
     state.inDetailsView = true;
     setGraphTransformEnabled(false);
+    if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
+
+    ui.viewport.classList.add('scrollable-mode');
+    ui.viewport.style.cursor = 'default';
     ui.connections.innerHTML = '';
     ui.gallery.innerHTML = '';
     ui.gallery.style.width = '100%';
-    ui.gallery.style.height = '100%';
 
     const wrapper = document.createElement('div');
     wrapper.className = 'details';
 
-    const back = document.createElement('div');
-    back.className = 'nav-item';
-    back.style.marginBottom = '2rem';
-    back.style.width = 'fit-content';
+    const header = document.createElement('div');
+    header.className = 'view-header';
+
+    // Determine navigation destination
     const cameFromMap = state.openedFromMap;
     const cameFromPeople = state.openedFromPeople;
-    const backLabel = cameFromMap ? 'Back to Map' : cameFromPeople ? 'Back to People' : 'Back to Timeline';
+    const backDest = cameFromMap ? 'map' : cameFromPeople ? 'people' : 'timeline';
+    const backLabel = cameFromMap ? 'Back to Map' : cameFromPeople ? 'Back to Identities' : 'Back to Timeline';
+
+    const back = document.createElement('div');
+    back.className = 'nav-item back-nav';
+    back.style.width = 'fit-content';
+    back.style.cursor = 'pointer';
+    back.setAttribute('data-back-action', backDest);
     back.innerHTML = `<i>←</i> <span>${backLabel}</span>`;
-    back.onclick = async () => {
-      state.inDetailsView = false;
-      state.openedFromMap = false;
-      state.openedFromPeople = false;
-      if (cameFromMap) {
-        setMapVisibility(true);
-      } else if (cameFromPeople) {
-        state.personFilter = null;
-        await openPeopleGallery();
-      } else {
-        renderClusters(state.filteredClusters);
-      }
+    back.onclick = (e) => {
+      e.stopPropagation();
+      handleBackNavigation();
     };
-    wrapper.appendChild(back);
+    header.appendChild(back);
+    wrapper.appendChild(header);
 
     const title = document.createElement('h2');
     title.innerText = formatDate(cluster.startTime);
@@ -738,7 +863,6 @@
 
     if (cluster.items[0].aiTags) {
       const tagContainer = document.createElement('div');
-      tagContainer.style.marginBottom = '1.5rem';
       const tags = cluster.items[0].aiTags.split(',');
       tags.forEach(tag => {
         const tagEl = document.createElement('div');
@@ -762,7 +886,9 @@
         const img = document.createElement('img');
         img.src = toFileSrc(item.path);
         img.loading = 'lazy';
-        img.onclick = () => showLightbox(toFileSrc(item.path));
+        const imageItems = cluster.items.filter(it => it.type !== 'video');
+        const imgIndex = imageItems.indexOf(item);
+        img.onclick = () => showLightbox(imageItems, imgIndex);
         grid.appendChild(img);
       }
     });
@@ -779,23 +905,36 @@
       wrapper.appendChild(none);
     } else {
       related.forEach((rel) => {
-        const btn = document.createElement('button');
-        btn.innerText = `${new Date(rel.startTime).toDateString()} (${rel.items.length})`;
-        btn.style.marginRight = '8px';
-        btn.style.marginBottom = '8px';
-        btn.onclick = () => openCluster(rel.id);
-        wrapper.appendChild(btn);
+        const item = document.createElement('div');
+        item.className = 'nav-item';
+        item.innerText = `${new Date(rel.startTime).toDateString()} (${rel.items.length})`;
+        item.onclick = (e) => {
+          e.stopPropagation();
+          openCluster(rel.id);
+        };
+        wrapper.appendChild(item);
       });
     }
 
     ui.gallery.appendChild(wrapper);
+
+    // Auto-focus on grid (images) after a short delay
+    setTimeout(() => {
+      grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
+
+    // Update sidebar state
+    updateNavActiveState();
   }
 
   function renderSearchResults(items) {
     state.inDetailsView = true;
     setGraphTransformEnabled(false);
+    ui.viewport.style.overflow = 'auto';
+    ui.viewport.style.cursor = 'default';
     ui.connections.innerHTML = '';
     ui.gallery.innerHTML = '';
+    ui.gallery.style.position = 'relative';
     ui.gallery.style.width = '100%';
     ui.gallery.style.height = '100%';
 
@@ -805,9 +944,8 @@
     const back = document.createElement('button');
     back.className = 'back-btn';
     back.innerText = '← Back to Graph';
-    back.onclick = () => {
-      state.inDetailsView = false;
-      renderClusters(state.filteredClusters);
+    back.onclick = async () => {
+      await handleBackNavigation();
     };
     wrapper.appendChild(back);
 
@@ -830,7 +968,9 @@
         const displaySrc = item.thumbnailPath || item.path;
         img.src = toFileSrc(displaySrc);
         img.loading = 'lazy';
-        img.onclick = () => showLightbox(toFileSrc(item.path));
+        const imageItems = items.filter(it => it.type !== 'video');
+        const imgIndex = imageItems.indexOf(item);
+        img.onclick = () => showLightbox(imageItems, imgIndex);
         grid.appendChild(img);
       }
     });
@@ -865,8 +1005,22 @@
 
       if (!state.faceFilter) return c;
       const filteredItems = c.items.filter(it => {
-        if (state.faceFilter === 'portrait') return it.faceCount === 1;
-        if (state.faceFilter === 'group') return it.faceCount >= 2;
+        const lowerTags = (it.aiTags || "").toLowerCase();
+
+        // Hierarchy of human indicators
+        const hasIdentity = it.personNames && it.personNames.trim().length > 0;
+        const humanTerms = ['person', 'man', 'woman', 'human', 'face', 'portrait', 'lady', 'gentleman', 'boy', 'girl', 'child', 'adult', 'people', 'smile', 'selfie'];
+        const hasHumanTerm = humanTerms.some(k => lowerTags.includes(k));
+
+        // Scalable clash detection (exclude if non-human categories dominate)
+        const clashTerms = ['car', 'boat', 'vehicle', 'automobile', 'nature', 'landscape', 'tree', 'flower', 'building', 'scenery', 'architecture', 'bird', 'animal', 'robot', 'statue', 'toy', 'watercraft'];
+        const hasClash = !hasIdentity && clashTerms.some(k => lowerTags.includes(k));
+
+        const hasPerson = hasIdentity || hasHumanTerm || lowerTags.includes('person');
+        const isVerifiedPerson = hasPerson && !hasClash;
+
+        if (state.faceFilter === 'portrait') return it.faceCount === 1 && isVerifiedPerson;
+        if (state.faceFilter === 'group') return it.faceCount >= 2 && isVerifiedPerson;
         return true;
       });
       return { ...c, items: filteredItems };
@@ -910,8 +1064,8 @@
     }
 
     const timelineVal = parseInt(ui.slider.value, 10);
-    const count = Math.ceil((timelineVal / 100) * state.allClusters.length);
-    let filtered = state.allClusters.slice(0, count);
+    const count = Math.ceil((timelineVal / 100) * baseClusters.length);
+    let filtered = baseClusters.slice(0, count);
 
     if (filtered.length > 0) {
       if (state.groupBy === 'date') {
@@ -931,9 +1085,11 @@
 
   function updateNavActiveState() {
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    if (state.showMap) {
+
+    // Highlight based on effective mode/origin
+    if (state.showMap || (state.inDetailsView && state.openedFromMap)) {
       ui.navMap.classList.add('active');
-    } else if (state.inDetailsView) {
+    } else if ((state.groupBy === 'person' && state.inDetailsView) || state.openedFromPeople) {
       ui.navPeople.classList.add('active');
     } else {
       ui.navTimeline.classList.add('active');
@@ -979,25 +1135,34 @@
     if (state.groupBy === nextGroupBy) return;
     state.groupBy = nextGroupBy;
     state.personFilter = null;
-    ui.groupBySelect.value = nextGroupBy;
+
+    // Sync visual dropdown if it exists
+    if (ui.groupBySelect) {
+      const trigger = ui.groupBySelect.querySelector('.dropdown-trigger');
+      const label = trigger.querySelector('.dropdown-label');
+      const item = ui.groupBySelect.querySelector(`.dropdown-item[data-value="${nextGroupBy}"]`);
+      if (item && label) {
+        ui.groupBySelect.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        label.innerText = item.innerText;
+      }
+    }
+
     await refreshViewMode();
   }
 
-  async function openPersonFocus(personId) {
+  async function focusClusterFromPeople(personId) {
     state.inDetailsView = false;
-    state.openedFromPeople = true;
     setMapVisibility(false, { skipRender: true });
     await switchGroupBy('person');
     state.personFilter = personId;
     applyFilters();
+    // Set flag AFTER async work so refreshViewMode can't wipe it
+    state.openedFromPeople = true;
     openCluster(`person-${personId}`);
   }
 
-  ui.groupBySelect.addEventListener('change', (e) => {
-    state.groupBy = e.target.value;
-    state.personFilter = null; // Clear focus when changing modes
-    refreshViewMode();
-  });
+  // Remove old event listener on select
 
   // Listen for progress updates from the main process
   if (window.api && window.api.on) {
@@ -1176,10 +1341,13 @@
   function bindInteractions() {
     document.addEventListener('click', (event) => {
       const popupTrigger = event.target.closest('.map-popup-link');
-      if (!popupTrigger) return;
-      event.preventDefault();
-      focusClusterFromMap(popupTrigger.dataset.clusterId);
+      if (popupTrigger) {
+        event.preventDefault();
+        focusClusterFromMap(popupTrigger.dataset.clusterId);
+        return;
+      }
     });
+
 
     ui.viewport.addEventListener('mousedown', (e) => {
       if (state.inDetailsView) return;
@@ -1238,12 +1406,34 @@
       ui.viewport.classList.remove('dragging');
     });
 
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && state.draggedNodeId) {
-        state.draggedNodeId = null;
-        state.nodeDragMoved = false;
-        ui.viewport.classList.remove('dragging');
-        redrawConnections(state.lastPositions);
+    window.addEventListener('keydown', async (e) => {
+      if (e.key === 'Backspace') {
+        // Prevent navigation if user is typing in an input or textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+          return;
+        }
+        // Don't navigate if lightbox is open (lightbox handles its own Backspace)
+        if (document.querySelector('.lightbox')) {
+          return;
+        }
+        e.preventDefault();
+        await handleBackNavigation();
+      }
+
+      if (e.key === 'Escape') {
+        if (state.draggedNodeId) {
+          state.draggedNodeId = null;
+          state.nodeDragMoved = false;
+          ui.viewport.classList.remove('dragging');
+          redrawConnections(state.lastPositions);
+        }
+        // Close modals if they are visible
+        if (ui.settingsModal && !ui.settingsModal.classList.contains('hidden')) {
+          ui.settingsModal.classList.add('hidden');
+        }
+        if (ui.renameModal && !ui.renameModal.classList.contains('hidden')) {
+          ui.renameModal.classList.add('hidden');
+        }
       }
     });
 
@@ -1309,6 +1499,10 @@
     if (ui.floatingRecenterBtn) {
       ui.floatingRecenterBtn.addEventListener('click', () => {
         centerOnPositions(state.lastPositions);
+
+        if (ui.floatingRecenterBtn) {
+          ui.floatingRecenterBtn.classList.add('hidden');
+        }
       });
     }
 
@@ -1319,25 +1513,84 @@
     });
 
     ui.navTimeline.onclick = async () => {
-      state.inDetailsView = false;
+      const token = ++state.navigationToken;
+      resetViewportContext();
       setMapVisibility(false, { skipRender: true });
       await switchGroupBy('date');
+      if (token !== state.navigationToken) return;
       if (state.groupBy === 'date') {
         refreshViewMode();
       }
     };
 
     ui.navPeople.onclick = async () => {
+      ++state.navigationToken;
       await openPeopleGallery();
     };
 
+    function setupCustomDropdown(el, onChange) {
+      if (!el) return;
+      const trigger = el.querySelector('.dropdown-trigger');
+      const labelEl = trigger.querySelector('.dropdown-label');
+      const menu = el.querySelector('.dropdown-menu');
+      const items = el.querySelectorAll('.dropdown-item');
+
+      trigger.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = menu.classList.contains('show');
+        // Close all other dropdowns
+        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
+        document.querySelectorAll('.dropdown-trigger').forEach(t => t.classList.remove('open'));
+
+        if (!isOpen) {
+          menu.classList.add('show');
+          trigger.classList.add('open');
+        }
+      };
+
+      items.forEach(item => {
+        item.onclick = (e) => {
+          e.stopPropagation();
+          const val = item.getAttribute('data-value');
+
+          // VISUAL SYNC
+          items.forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          if (labelEl) labelEl.innerText = item.innerText;
+
+          onChange(val);
+          menu.classList.remove('show');
+          trigger.classList.remove('open');
+        };
+      });
+    }
+
+    setupCustomDropdown(ui.groupBySelect, (val) => {
+      switchGroupBy(val);
+    });
+
+    setupCustomDropdown(ui.mapStyleSelect, (val) => {
+      setMapStyle(val);
+    });
+
+    // Close on outside click
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
+      document.querySelectorAll('.dropdown-trigger').forEach(t => t.classList.remove('open'));
+    });
+
     ui.navMap.onclick = async () => {
+      const token = ++state.navigationToken;
       const willShow = !state.showMap;
       if (willShow) {
+        resetViewportContext();
         await switchGroupBy('location');
+        if (token !== state.navigationToken) return;
       } else {
+        resetViewportContext();
         setMapVisibility(false, { skipRender: true });
         await switchGroupBy('date');
+        if (token !== state.navigationToken) return;
         if (state.groupBy === 'date') {
           refreshViewMode();
         }
@@ -1351,6 +1604,10 @@
       ui.fitMapBtn.onclick = () => {
         state.mapSearchLocked = false;
         fitMapToClusters(state.filteredClusters);
+
+        if (ui.fitMapBtn) {
+          ui.fitMapBtn.classList.add('hidden');
+        }
       };
     }
 
@@ -1513,21 +1770,34 @@
     }
 
     async function openPeopleGallery() {
+      const token = state.navigationToken;
       await switchGroupBy('person');
+      if (token !== state.navigationToken) return;
+
       state.inDetailsView = true;
       setMapVisibility(false, { skipRender: true });
       setGraphTransformEnabled(false);
+      if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
+
+      ui.viewport.classList.add('scrollable-mode');
+      ui.viewport.style.cursor = 'default';
       ui.connections.innerHTML = '';
       ui.gallery.innerHTML = '';
+      ui.gallery.style.position = 'relative';
       ui.gallery.style.width = '100%';
-      ui.gallery.style.height = '100%';
+      ui.gallery.style.height = 'auto'; // Allow growth
+      ui.gallery.style.minHeight = '100%'; // Ensure background coverage
 
       const wrapper = document.createElement('div');
       wrapper.className = 'details';
 
+      const header = document.createElement('div');
+      header.className = 'view-header';
+
       const title = document.createElement('h2');
-      title.innerText = 'Recognized People';
-      wrapper.appendChild(title);
+      title.innerText = 'Recognized Identities';
+      header.appendChild(title);
+      wrapper.appendChild(header);
 
       const people = await window.api.invoke('get-people');
       const grid = document.createElement('div');
@@ -1579,7 +1849,7 @@
         rename.onclick = openRename;
 
         item.onclick = async () => {
-          await openPersonFocus(person.id);
+          await focusClusterFromPeople(person.id);
         };
 
         item.appendChild(img);
@@ -1590,6 +1860,8 @@
 
       wrapper.appendChild(grid);
       ui.gallery.appendChild(wrapper);
+      ui.viewport.scrollTop = 0;
+      updateNavActiveState();
     };
 
     ui.refreshLibraryBtn.addEventListener('click', async () => {
