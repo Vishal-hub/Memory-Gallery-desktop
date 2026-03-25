@@ -990,8 +990,24 @@
 
       if (!state.faceFilter) return c;
       const filteredItems = c.items.filter(it => {
-        if (state.faceFilter === 'portrait') return it.faceCount === 1;
-        if (state.faceFilter === 'group') return it.faceCount >= 2;
+        const lowerTags = (it.aiTags || "").toLowerCase();
+        const hasPerson = (it.personNames && it.personNames.trim().length > 0) || lowerTags.includes('person');
+
+        // Exclude if it looks like a false positive (car/nature identified as primary)
+        // unless a real person name is recognized.
+        const isFalsePositive = !it.personNames && (
+          lowerTags.includes('car') ||
+          lowerTags.includes('boat') ||
+          lowerTags.includes('bird') ||
+          lowerTags.includes('tree') ||
+          lowerTags.includes('nature') ||
+          lowerTags.includes('landscape') ||
+          lowerTags.includes('vehicle') ||
+          lowerTags.includes('automobile')
+        );
+
+        if (state.faceFilter === 'portrait') return it.faceCount === 1 && hasPerson && !isFalsePositive;
+        if (state.faceFilter === 'group') return it.faceCount >= 2 && hasPerson && !isFalsePositive;
         return true;
       });
       return { ...c, items: filteredItems };
@@ -1035,8 +1051,8 @@
     }
 
     const timelineVal = parseInt(ui.slider.value, 10);
-    const count = Math.ceil((timelineVal / 100) * state.allClusters.length);
-    let filtered = state.allClusters.slice(0, count);
+    const count = Math.ceil((timelineVal / 100) * baseClusters.length);
+    let filtered = baseClusters.slice(0, count);
 
     if (filtered.length > 0) {
       if (state.groupBy === 'date') {
