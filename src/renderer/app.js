@@ -162,6 +162,21 @@
     updateMorphedLayout(morphFactor);
   }
 
+  function resetViewportContext() {
+    state.inDetailsView = false;
+    state.openedFromMap = false;
+    state.openedFromPeople = false;
+    if (ui.viewport) {
+      ui.viewport.classList.remove('scrollable-mode');
+      ui.viewport.style.overflow = 'hidden';
+      ui.viewport.style.cursor = 'grab';
+    }
+    if (ui.gallery) {
+      ui.gallery.style.position = 'absolute';
+      ui.gallery.style.height = '100%';
+    }
+  }
+
   function updateMorphedLayout(morphFactor) {
     if (!state.lastPositions || state.lastPositions.length === 0) return;
 
@@ -768,27 +783,14 @@
     console.log('[Nav] Back navigation triggered, action=', action);
 
     if (action === 'people') {
-      state.openedFromMap = false;
-      state.openedFromPeople = false;
-      state.personFilter = null;
-      // Use navPeople.click() because openPeopleGallery is scoped inside bindInteractions
+      resetViewportContext();
       ui.navPeople.click();
     } else if (action === 'map') {
-      state.inDetailsView = false;
-      state.openedFromMap = false;
-      state.openedFromPeople = false;
-      ui.viewport.style.overflow = 'hidden';
-      ui.viewport.style.cursor = 'grab';
-      ui.gallery.style.position = 'absolute';
+      resetViewportContext();
       setMapVisibility(true);
       setTimeout(() => setTransform(), 0);
     } else {
-      state.inDetailsView = false;
-      state.openedFromMap = false;
-      state.openedFromPeople = false;
-      ui.viewport.style.overflow = 'hidden';
-      ui.viewport.style.cursor = 'grab';
-      ui.gallery.style.position = 'absolute';
+      resetViewportContext();
       renderClusters(state.filteredClusters);
       setTransform();
     }
@@ -801,36 +803,37 @@
     state.inDetailsView = true;
     setGraphTransformEnabled(false);
     if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
-    ui.viewport.style.overflow = 'auto';
+
+    ui.viewport.classList.add('scrollable-mode');
     ui.viewport.style.cursor = 'default';
     ui.connections.innerHTML = '';
     ui.gallery.innerHTML = '';
-    ui.gallery.style.position = 'relative';
     ui.gallery.style.width = '100%';
-    ui.gallery.style.height = '100%';
 
     const wrapper = document.createElement('div');
     wrapper.className = 'details';
+
+    const header = document.createElement('div');
+    header.className = 'view-header';
 
     // Determine navigation destination
     const cameFromMap = state.openedFromMap;
     const cameFromPeople = state.openedFromPeople;
     const backDest = cameFromMap ? 'map' : cameFromPeople ? 'people' : 'timeline';
-    const backLabel = cameFromMap ? 'Back to Map' : cameFromPeople ? 'Back to People' : 'Back to Timeline';
+    const backLabel = cameFromMap ? 'Back to Map' : cameFromPeople ? 'Back to Identities' : 'Back to Timeline';
 
     const back = document.createElement('div');
     back.className = 'nav-item back-nav';
-    back.style.marginBottom = '2rem';
     back.style.width = 'fit-content';
     back.style.cursor = 'pointer';
     back.setAttribute('data-back-action', backDest);
     back.innerHTML = `<i>←</i> <span>${backLabel}</span>`;
-    back.onclick = async (e) => {
+    back.onclick = (e) => {
       e.stopPropagation();
-      console.log('[Nav] Back button clicked directly, action=', backDest);
-      await handleBackNavigation();
+      handleBackNavigation();
     };
-    wrapper.appendChild(back);
+    header.appendChild(back);
+    wrapper.appendChild(header);
 
     const title = document.createElement('h2');
     title.innerText = formatDate(cluster.startTime);
@@ -845,7 +848,6 @@
 
     if (cluster.items[0].aiTags) {
       const tagContainer = document.createElement('div');
-      tagContainer.style.marginBottom = '1.5rem';
       const tags = cluster.items[0].aiTags.split(',');
       tags.forEach(tag => {
         const tagEl = document.createElement('div');
@@ -888,21 +890,25 @@
       wrapper.appendChild(none);
     } else {
       related.forEach((rel) => {
-        const btn = document.createElement('button');
-        btn.innerText = `${new Date(rel.startTime).toDateString()} (${rel.items.length})`;
-        btn.style.marginRight = '8px';
-        btn.style.marginBottom = '8px';
-        btn.onclick = () => openCluster(rel.id);
-        wrapper.appendChild(btn);
+        const item = document.createElement('div');
+        item.className = 'nav-item';
+        item.innerText = `${new Date(rel.startTime).toDateString()} (${rel.items.length})`;
+        item.onclick = (e) => {
+          e.stopPropagation();
+          openCluster(rel.id);
+        };
+        wrapper.appendChild(item);
       });
     }
 
     ui.gallery.appendChild(wrapper);
 
-    // Scroll viewport to top so back button is visible
-    ui.viewport.scrollTop = 0;
+    // Auto-focus on grid (images) after a short delay
+    setTimeout(() => {
+      grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
 
-    // Update sidebar to show People as active when viewing a person's cluster
+    // Update sidebar state
     updateNavActiveState();
   }
 
@@ -1050,9 +1056,11 @@
 
   function updateNavActiveState() {
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    if (state.showMap) {
+
+    // Highlight based on effective mode/origin
+    if (state.showMap || (state.inDetailsView && state.openedFromMap)) {
       ui.navMap.classList.add('active');
-    } else if (state.inDetailsView) {
+    } else if ((state.groupBy === 'person' && state.inDetailsView) || state.openedFromPeople) {
       ui.navPeople.classList.add('active');
     } else {
       ui.navTimeline.classList.add('active');
@@ -1098,7 +1106,7 @@
     if (state.groupBy === nextGroupBy) return;
     state.groupBy = nextGroupBy;
     state.personFilter = null;
-    
+
     // Sync visual dropdown
     if (ui.groupBySelect) {
       const trigger = ui.groupBySelect.querySelector('.dropdown-trigger');
@@ -1311,12 +1319,6 @@
       }
     });
 
-    function resetViewportContext() {
-      state.inDetailsView = false;
-      ui.viewport.style.overflow = 'hidden';
-      ui.viewport.style.cursor = 'grab';
-      ui.gallery.style.position = 'absolute';
-    }
 
     ui.viewport.addEventListener('mousedown', (e) => {
       if (state.inDetailsView) return;
@@ -1509,7 +1511,7 @@
         // Close all other dropdowns
         document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
         document.querySelectorAll('.dropdown-trigger').forEach(t => t.classList.remove('open'));
-        
+
         if (!isOpen) {
           menu.classList.add('show');
           trigger.classList.add('open');
@@ -1742,20 +1744,26 @@
       setMapVisibility(false, { skipRender: true });
       setGraphTransformEnabled(false);
       if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
-      ui.viewport.style.overflow = 'auto';
+
+      ui.viewport.classList.add('scrollable-mode');
       ui.viewport.style.cursor = 'default';
       ui.connections.innerHTML = '';
       ui.gallery.innerHTML = '';
       ui.gallery.style.position = 'relative';
       ui.gallery.style.width = '100%';
-      ui.gallery.style.height = '100%';
+      ui.gallery.style.height = 'auto'; // Allow growth
+      ui.gallery.style.minHeight = '100%'; // Ensure background coverage
 
       const wrapper = document.createElement('div');
       wrapper.className = 'details';
 
+      const header = document.createElement('div');
+      header.className = 'view-header';
+
       const title = document.createElement('h2');
-      title.innerText = 'Recognized People';
-      wrapper.appendChild(title);
+      title.innerText = 'Recognized Identities';
+      header.appendChild(title);
+      wrapper.appendChild(header);
 
       const people = await window.api.invoke('get-people');
       const grid = document.createElement('div');
