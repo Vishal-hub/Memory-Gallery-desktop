@@ -46,6 +46,7 @@
     people: [],
     personFilter: null,
     libraryDirty: false,
+    navigationToken: 0,
   };
 
   const ui = {
@@ -71,12 +72,12 @@
     filterGroupBtn: document.getElementById('filterGroupBtn'),
     floatingRecenterBtn: document.getElementById('floatingRecenterBtn'),
     clearCacheActionBtn: document.getElementById('clearCacheActionBtn'),
-    groupBySelect: document.getElementById('groupBySelect'),
+    groupBySelect: document.getElementById('groupByDropdown'),
     mapPanel: document.getElementById('map-panel'),
     mapModeWrap: document.getElementById('mapModeWrap'),
     mapModeMeta: document.getElementById('mapModeMeta'),
     fitMapBtn: document.getElementById('fitMapBtn'),
-    mapStyleSelect: document.getElementById('mapStyleSelect'),
+    mapStyleSelect: document.getElementById('mapStyleDropdown'),
     navTimeline: document.getElementById('navTimeline'),
     navPeople: document.getElementById('navPeople'),
     navMap: document.getElementById('navMap'),
@@ -136,19 +137,24 @@
   }
 
   function setTransform() {
+    if (state.inDetailsView) {
+      if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
+    } else {
+      const movedX = Math.abs(state.offsetX - state.idealOffsetX) > 8;
+      const movedY = Math.abs(state.offsetY - state.idealOffsetY) > 8;
+      const zoomed = Math.abs(state.scale - 1.0) > 0.02;
+
+      const isOffCenter = movedX || movedY || zoomed;
+
+      if (ui.floatingRecenterBtn) {
+        ui.floatingRecenterBtn.classList.toggle('hidden', !isOffCenter);
+      }
+    }
+
     const transform = `translate(${state.offsetX}px, ${state.offsetY}px) scale(${state.scale})`;
     ui.gallery.style.transform = transform;
     ui.connections.style.transform = transform;
 
-    // DYNAMIC RECENTER BUTTON VISIBILITY
-    const isOffCenter = Math.abs(state.scale - 1.0) > 0.05 || Math.abs(state.offsetX - state.idealOffsetX) > 200;
-    if (ui.floatingRecenterBtn) {
-      ui.floatingRecenterBtn.classList.toggle('hidden', !isOffCenter);
-    }
-
-    // DYNAMIC LAYOUT MORPHING (Google Earth style)
-    // ZOOM OUT MORPH (Circle Planet)
-    // starts at 0.75, fully formed at 0.18
     const outThreshold = 0.75;
     const outEnd = 0.18;
     const morphFactor = Math.max(0, Math.min(1, (outThreshold - state.scale) / (outThreshold - outEnd)));
@@ -271,7 +277,7 @@
 
     // 1. FORCE SCALE TO 1.0 (no morph at this scale)
     state.scale = 1.0;
-
+    state.idealScale = 1; // ✅ IMPORTANT
     // 2. RESET ALL NODES TO PURE WAVE POSITIONS
     positions.forEach((pos, i) => {
       const waveX = GRAPH.startX + i * GRAPH.gapX;
@@ -320,34 +326,90 @@
     redrawConnections(positions);
   }
 
-  function showLightbox(src, altText = 'Photo preview') {
+  function showLightbox(items, startIndex = 0) {
+    if (!items || items.length === 0) return;
+    let currentIndex = startIndex;
+
     const overlay = document.createElement('div');
     overlay.className = 'lightbox';
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'close';
-    closeBtn.innerText = 'x';
+    closeBtn.innerHTML = '&times;';
 
     const img = document.createElement('img');
-    img.src = src;
-    img.alt = altText;
+    const counter = document.createElement('div');
+    counter.className = 'lightbox-counter';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'lightbox-nav prev';
+    prevBtn.innerHTML = '&#10094;';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'lightbox-nav next';
+    nextBtn.innerHTML = '&#10095;';
+
+    function updateContent() {
+      const item = items[currentIndex];
+      img.src = toFileSrc(item.path);
+      img.alt = item.placeName || 'Photo preview';
+      counter.innerText = `${currentIndex + 1} / ${items.length}`;
+
+      // Hide nav buttons if only one image
+      prevBtn.style.display = items.length > 1 ? 'block' : 'none';
+      nextBtn.style.display = items.length > 1 ? 'block' : 'none';
+    }
+
+    function showPrev(e) {
+      if (e) e.stopPropagation();
+      currentIndex = (currentIndex - 1 + items.length) % items.length;
+      updateContent();
+    }
+
+    function showNext(e) {
+      if (e) e.stopPropagation();
+      currentIndex = (currentIndex + 1) % items.length;
+      updateContent();
+    }
 
     function close() {
       overlay.remove();
-      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('keydown', handleKeys);
     }
-    function handleEsc(e) {
-      if (e.key === 'Escape') close();
+
+    function handleKeys(e) {
+      if (e.key === 'Escape' || e.key === 'Backspace') close();
+      if (e.key === 'ArrowLeft') showPrev();
+      if (e.key === 'ArrowRight') showNext();
     }
 
     closeBtn.onclick = close;
+    prevBtn.onclick = showPrev;
+    nextBtn.onclick = showNext;
+
+    // Clicking left/right side of the overlay to navigate
     overlay.onclick = (e) => {
-      if (e.target === overlay) close();
+      if (e.target === overlay) {
+        close();
+        return;
+      }
+      const rect = overlay.getBoundingClientRect();
+      if (e.clientX < rect.width / 3) {
+        showPrev();
+      } else if (e.clientX > (rect.width * 2) / 3) {
+        showNext();
+      }
     };
+
+    updateContent();
+
     overlay.appendChild(closeBtn);
+    overlay.appendChild(prevBtn);
+    overlay.appendChild(nextBtn);
     overlay.appendChild(img);
+    overlay.appendChild(counter);
     document.body.appendChild(overlay);
-    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('keydown', handleKeys);
   }
 
   function getRelatedClusters(currentEventId) {
@@ -418,7 +480,14 @@
     state.mapTileLayer = L.tileLayer(style.url, style.options).addTo(state.map);
     state.currentMapStyle = styleKey;
     if (ui.mapStyleSelect) {
-      ui.mapStyleSelect.value = styleKey;
+      const trigger = ui.mapStyleSelect.querySelector('.dropdown-trigger');
+      const label = trigger.querySelector('.dropdown-label');
+      const item = ui.mapStyleSelect.querySelector(`.dropdown-item[data-value="${styleKey}"]`);
+      if (item) {
+        ui.mapStyleSelect.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        label.innerText = item.innerText;
+      }
     }
   }
 
@@ -688,40 +757,78 @@
     updateMapMarkers(clusters, options);
   }
 
+  async function handleBackNavigation() {
+    if (!state.inDetailsView) return;
+
+    // Check if there's a specific back-action attribute, or use current flags
+    const backBtn = document.querySelector('.back-nav');
+    const action = backBtn ? backBtn.getAttribute('data-back-action') :
+      (state.openedFromMap ? 'map' : (state.openedFromPeople ? 'people' : 'timeline'));
+
+    console.log('[Nav] Back navigation triggered, action=', action);
+
+    if (action === 'people') {
+      state.openedFromMap = false;
+      state.openedFromPeople = false;
+      state.personFilter = null;
+      // Use navPeople.click() because openPeopleGallery is scoped inside bindInteractions
+      ui.navPeople.click();
+    } else if (action === 'map') {
+      state.inDetailsView = false;
+      state.openedFromMap = false;
+      state.openedFromPeople = false;
+      ui.viewport.style.overflow = 'hidden';
+      ui.viewport.style.cursor = 'grab';
+      ui.gallery.style.position = 'absolute';
+      setMapVisibility(true);
+      setTimeout(() => setTransform(), 0);
+    } else {
+      state.inDetailsView = false;
+      state.openedFromMap = false;
+      state.openedFromPeople = false;
+      ui.viewport.style.overflow = 'hidden';
+      ui.viewport.style.cursor = 'grab';
+      ui.gallery.style.position = 'absolute';
+      renderClusters(state.filteredClusters);
+      setTransform();
+    }
+  }
+
   function openCluster(eventId) {
     const cluster = state.filteredClusters.find((c) => c.id === eventId);
     if (!cluster) return;
 
     state.inDetailsView = true;
     setGraphTransformEnabled(false);
+    if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
+    ui.viewport.style.overflow = 'auto';
+    ui.viewport.style.cursor = 'default';
     ui.connections.innerHTML = '';
     ui.gallery.innerHTML = '';
+    ui.gallery.style.position = 'relative';
     ui.gallery.style.width = '100%';
     ui.gallery.style.height = '100%';
 
     const wrapper = document.createElement('div');
     wrapper.className = 'details';
 
-    const back = document.createElement('div');
-    back.className = 'nav-item';
-    back.style.marginBottom = '2rem';
-    back.style.width = 'fit-content';
+    // Determine navigation destination
     const cameFromMap = state.openedFromMap;
     const cameFromPeople = state.openedFromPeople;
+    const backDest = cameFromMap ? 'map' : cameFromPeople ? 'people' : 'timeline';
     const backLabel = cameFromMap ? 'Back to Map' : cameFromPeople ? 'Back to People' : 'Back to Timeline';
+
+    const back = document.createElement('div');
+    back.className = 'nav-item back-nav';
+    back.style.marginBottom = '2rem';
+    back.style.width = 'fit-content';
+    back.style.cursor = 'pointer';
+    back.setAttribute('data-back-action', backDest);
     back.innerHTML = `<i>←</i> <span>${backLabel}</span>`;
-    back.onclick = async () => {
-      state.inDetailsView = false;
-      state.openedFromMap = false;
-      state.openedFromPeople = false;
-      if (cameFromMap) {
-        setMapVisibility(true);
-      } else if (cameFromPeople) {
-        state.personFilter = null;
-        await openPeopleGallery();
-      } else {
-        renderClusters(state.filteredClusters);
-      }
+    back.onclick = async (e) => {
+      e.stopPropagation();
+      console.log('[Nav] Back button clicked directly, action=', backDest);
+      await handleBackNavigation();
     };
     wrapper.appendChild(back);
 
@@ -762,7 +869,9 @@
         const img = document.createElement('img');
         img.src = toFileSrc(item.path);
         img.loading = 'lazy';
-        img.onclick = () => showLightbox(toFileSrc(item.path));
+        const imageItems = cluster.items.filter(it => it.type !== 'video');
+        const imgIndex = imageItems.indexOf(item);
+        img.onclick = () => showLightbox(imageItems, imgIndex);
         grid.appendChild(img);
       }
     });
@@ -789,13 +898,22 @@
     }
 
     ui.gallery.appendChild(wrapper);
+
+    // Scroll viewport to top so back button is visible
+    ui.viewport.scrollTop = 0;
+
+    // Update sidebar to show People as active when viewing a person's cluster
+    updateNavActiveState();
   }
 
   function renderSearchResults(items) {
     state.inDetailsView = true;
     setGraphTransformEnabled(false);
+    ui.viewport.style.overflow = 'auto';
+    ui.viewport.style.cursor = 'default';
     ui.connections.innerHTML = '';
     ui.gallery.innerHTML = '';
+    ui.gallery.style.position = 'relative';
     ui.gallery.style.width = '100%';
     ui.gallery.style.height = '100%';
 
@@ -805,9 +923,8 @@
     const back = document.createElement('button');
     back.className = 'back-btn';
     back.innerText = '← Back to Graph';
-    back.onclick = () => {
-      state.inDetailsView = false;
-      renderClusters(state.filteredClusters);
+    back.onclick = async () => {
+      await handleBackNavigation();
     };
     wrapper.appendChild(back);
 
@@ -830,7 +947,9 @@
         const displaySrc = item.thumbnailPath || item.path;
         img.src = toFileSrc(displaySrc);
         img.loading = 'lazy';
-        img.onclick = () => showLightbox(toFileSrc(item.path));
+        const imageItems = items.filter(it => it.type !== 'video');
+        const imgIndex = imageItems.indexOf(item);
+        img.onclick = () => showLightbox(imageItems, imgIndex);
         grid.appendChild(img);
       }
     });
@@ -979,25 +1098,34 @@
     if (state.groupBy === nextGroupBy) return;
     state.groupBy = nextGroupBy;
     state.personFilter = null;
-    ui.groupBySelect.value = nextGroupBy;
+    
+    // Sync visual dropdown
+    if (ui.groupBySelect) {
+      const trigger = ui.groupBySelect.querySelector('.dropdown-trigger');
+      const label = trigger.querySelector('.dropdown-label');
+      const item = ui.groupBySelect.querySelector(`.dropdown-item[data-value="${nextGroupBy}"]`);
+      if (item) {
+        ui.groupBySelect.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        label.innerText = item.innerText;
+      }
+    }
+
     await refreshViewMode();
   }
 
-  async function openPersonFocus(personId) {
+  async function focusClusterFromPeople(personId) {
     state.inDetailsView = false;
-    state.openedFromPeople = true;
     setMapVisibility(false, { skipRender: true });
     await switchGroupBy('person');
     state.personFilter = personId;
     applyFilters();
+    // Set flag AFTER async work so refreshViewMode can't wipe it
+    state.openedFromPeople = true;
     openCluster(`person-${personId}`);
   }
 
-  ui.groupBySelect.addEventListener('change', (e) => {
-    state.groupBy = e.target.value;
-    state.personFilter = null; // Clear focus when changing modes
-    refreshViewMode();
-  });
+  // Remove old event listener on select
 
   // Listen for progress updates from the main process
   if (window.api && window.api.on) {
@@ -1176,10 +1304,19 @@
   function bindInteractions() {
     document.addEventListener('click', (event) => {
       const popupTrigger = event.target.closest('.map-popup-link');
-      if (!popupTrigger) return;
-      event.preventDefault();
-      focusClusterFromMap(popupTrigger.dataset.clusterId);
+      if (popupTrigger) {
+        event.preventDefault();
+        focusClusterFromMap(popupTrigger.dataset.clusterId);
+        return;
+      }
     });
+
+    function resetViewportContext() {
+      state.inDetailsView = false;
+      ui.viewport.style.overflow = 'hidden';
+      ui.viewport.style.cursor = 'grab';
+      ui.gallery.style.position = 'absolute';
+    }
 
     ui.viewport.addEventListener('mousedown', (e) => {
       if (state.inDetailsView) return;
@@ -1238,12 +1375,34 @@
       ui.viewport.classList.remove('dragging');
     });
 
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && state.draggedNodeId) {
-        state.draggedNodeId = null;
-        state.nodeDragMoved = false;
-        ui.viewport.classList.remove('dragging');
-        redrawConnections(state.lastPositions);
+    window.addEventListener('keydown', async (e) => {
+      if (e.key === 'Backspace') {
+        // Prevent navigation if user is typing in an input or textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+          return;
+        }
+        // Don't navigate if lightbox is open (lightbox handles its own Backspace)
+        if (document.querySelector('.lightbox')) {
+          return;
+        }
+        e.preventDefault();
+        await handleBackNavigation();
+      }
+
+      if (e.key === 'Escape') {
+        if (state.draggedNodeId) {
+          state.draggedNodeId = null;
+          state.nodeDragMoved = false;
+          ui.viewport.classList.remove('dragging');
+          redrawConnections(state.lastPositions);
+        }
+        // Close modals if they are visible
+        if (ui.settingsModal && !ui.settingsModal.classList.contains('hidden')) {
+          ui.settingsModal.classList.add('hidden');
+        }
+        if (ui.renameModal && !ui.renameModal.classList.contains('hidden')) {
+          ui.renameModal.classList.add('hidden');
+        }
       }
     });
 
@@ -1309,6 +1468,10 @@
     if (ui.floatingRecenterBtn) {
       ui.floatingRecenterBtn.addEventListener('click', () => {
         centerOnPositions(state.lastPositions);
+
+        if (ui.floatingRecenterBtn) {
+          ui.floatingRecenterBtn.classList.add('hidden');
+        }
       });
     }
 
@@ -1319,25 +1482,79 @@
     });
 
     ui.navTimeline.onclick = async () => {
-      state.inDetailsView = false;
+      const token = ++state.navigationToken;
+      resetViewportContext();
       setMapVisibility(false, { skipRender: true });
       await switchGroupBy('date');
+      if (token !== state.navigationToken) return;
       if (state.groupBy === 'date') {
         refreshViewMode();
       }
     };
 
     ui.navPeople.onclick = async () => {
+      ++state.navigationToken;
       await openPeopleGallery();
     };
 
+    function setupCustomDropdown(el, onChange) {
+      if (!el) return;
+      const trigger = el.querySelector('.dropdown-trigger');
+      const menu = el.querySelector('.dropdown-menu');
+      const items = el.querySelectorAll('.dropdown-item');
+
+      trigger.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = menu.classList.contains('show');
+        // Close all other dropdowns
+        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
+        document.querySelectorAll('.dropdown-trigger').forEach(t => t.classList.remove('open'));
+        
+        if (!isOpen) {
+          menu.classList.add('show');
+          trigger.classList.add('open');
+        }
+      };
+
+      items.forEach(item => {
+        item.onclick = (e) => {
+          e.stopPropagation();
+          const val = item.getAttribute('data-value');
+          onChange(val);
+          menu.classList.remove('show');
+          trigger.classList.remove('open');
+        };
+      });
+    }
+
+    setupCustomDropdown(ui.groupBySelect, (val) => {
+      state.groupBy = val;
+      state.personFilter = null;
+      refreshViewMode();
+    });
+
+    setupCustomDropdown(ui.mapStyleSelect, (val) => {
+      setMapStyle(val);
+    });
+
+    // Close on outside click
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
+      document.querySelectorAll('.dropdown-trigger').forEach(t => t.classList.remove('open'));
+    });
+
     ui.navMap.onclick = async () => {
+      const token = ++state.navigationToken;
       const willShow = !state.showMap;
       if (willShow) {
+        resetViewportContext();
         await switchGroupBy('location');
+        if (token !== state.navigationToken) return;
       } else {
+        resetViewportContext();
         setMapVisibility(false, { skipRender: true });
         await switchGroupBy('date');
+        if (token !== state.navigationToken) return;
         if (state.groupBy === 'date') {
           refreshViewMode();
         }
@@ -1351,6 +1568,10 @@
       ui.fitMapBtn.onclick = () => {
         state.mapSearchLocked = false;
         fitMapToClusters(state.filteredClusters);
+
+        if (ui.fitMapBtn) {
+          ui.fitMapBtn.classList.add('hidden');
+        }
       };
     }
 
@@ -1513,12 +1734,19 @@
     }
 
     async function openPeopleGallery() {
+      const token = state.navigationToken;
       await switchGroupBy('person');
+      if (token !== state.navigationToken) return;
+
       state.inDetailsView = true;
       setMapVisibility(false, { skipRender: true });
       setGraphTransformEnabled(false);
+      if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
+      ui.viewport.style.overflow = 'auto';
+      ui.viewport.style.cursor = 'default';
       ui.connections.innerHTML = '';
       ui.gallery.innerHTML = '';
+      ui.gallery.style.position = 'relative';
       ui.gallery.style.width = '100%';
       ui.gallery.style.height = '100%';
 
@@ -1579,7 +1807,7 @@
         rename.onclick = openRename;
 
         item.onclick = async () => {
-          await openPersonFocus(person.id);
+          await focusClusterFromPeople(person.id);
         };
 
         item.appendChild(img);
@@ -1590,6 +1818,8 @@
 
       wrapper.appendChild(grid);
       ui.gallery.appendChild(wrapper);
+      ui.viewport.scrollTop = 0;
+      updateNavActiveState();
     };
 
     ui.refreshLibraryBtn.addEventListener('click', async () => {
