@@ -36,7 +36,7 @@ function updatePeopleStats(people) {
     const total = people.length;
     const unnamed = people.filter(p => !p.is_named).length;
     if (ui.peopleCount) ui.peopleCount.textContent = `${total} ${total === 1 ? 'Person' : 'People'}`;
-    if (ui.peopleUnnamed) ui.peopleUnnamed.textContent = unnamed > 0 ? `${unnamed} Unnamed` : 'All named';
+    if (ui.peopleUnnamed) ui.peopleUnnamed.textContent = unnamed > 0 ? `${unnamed} Anonymous` : 'Identified';
 }
 
 export function showPeopleToolbar() {
