@@ -1,7 +1,7 @@
 {
   "name": "memory-desktop",
   "version": "1.0.0",
-  "description": "",
+  "description": "AI-powered desktop photo gallery with semantic search, face recognition, and timeline clustering",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -10,8 +10,8 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["electron", "photo-gallery", "ai", "clip", "face-recognition", "semantic-search"],
+  "author": "Vishal",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
@@ -41,6 +41,14 @@
         "zip"
       ]
     },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.photography",
+      "darkModeSupport": true
+    },
     "nsis": {
       "oneClick": true,
       "allowToChangeInstallationDirectory": false,
@@ -48,10 +56,17 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Memory Gallery"
     },
+    "dmg": {
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
     "asar": true,
     "asarUnpack": [
+      "**/node_modules/ffmpeg-static/ffmpeg",
       "**/node_modules/ffmpeg-static/ffmpeg.exe",
-      "**/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"
+      "**/node_modules/ffprobe-static/bin/**/*"
     ],
     "files": [
       "**/*",
@@ -60,7 +75,8 @@
       "!docs",
       "!.github",
       "!*.log",
-      "!.gitignore"
+      "!.gitignore",
+      "!tmp"
     ]
   }
 }

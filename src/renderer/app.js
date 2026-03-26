@@ -1631,16 +1631,6 @@
         console.error('Failed to open folders:', err);
         alert('Could not open folder settings.');
       }
-      try {
-        const settings = await window.api.invoke('get-index-roots');
-        state.indexRoots = Array.isArray(settings) ? settings : settings.roots;
-        ui.includeVideosCheckbox.checked = settings.includeVideos !== false;
-        renderRootsList();
-        ui.settingsModal.classList.remove('hidden');
-      } catch (err) {
-        console.error('Failed to open folders:', err);
-        alert('Could not open folder settings.');
-      }
     };
 
     ui.closeSettingsBtn.onclick = () => ui.settingsModal.classList.add('hidden');

@@ -6,8 +6,10 @@ memory_graph.db
 memory_graph.db-journal
 .cache/
 temp/
+tmp/
 logs/
 *.log
+*.sqlite
 
 # Build & OS
 dist/

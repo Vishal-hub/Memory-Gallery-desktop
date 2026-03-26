@@ -462,10 +462,6 @@ button:active {
   transform: translateY(0);
 }
 
-button:active {
-  transform: translateY(0);
-}
-
 #status {
   position: fixed;
   bottom: 2rem;
