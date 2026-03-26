@@ -2,7 +2,7 @@
 <html>
 
 <head>
-  <title>Memory Graph</title>
+  <title>Memory Gallery</title>
   <link rel="stylesheet" href="src/renderer/styles.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
@@ -13,9 +13,10 @@
 <body>
   <div class="app">
     <!-- Minimalist Sidebar -->
-    <nav class="sidebar">
-      <div class="brand">MG</div>
-      <div class="nav-item active" id="navTimeline" title="Timeline View">
+    <nav class="sidebar" role="navigation" aria-label="Main navigation">
+      <div class="brand" aria-hidden="true">MG</div>
+      <div class="nav-item active" id="navTimeline" title="Timeline View" role="button" tabindex="0"
+        aria-current="page">
         <i>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
@@ -31,7 +32,7 @@
         </i>
         <span>Timeline</span>
       </div>
-      <div class="nav-item" id="navPeople" title="People Gallery">
+      <div class="nav-item" id="navPeople" title="People Gallery" role="button" tabindex="0">
         <i>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
@@ -42,7 +43,7 @@
         </i>
         <span>People</span>
       </div>
-      <div class="nav-item" id="navMap" title="Map View">
+      <div class="nav-item" id="navMap" title="Map View" role="button" tabindex="0">
         <i>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
@@ -52,8 +53,8 @@
         </i>
         <span>Map Mode</span>
       </div>
-      <div style="flex: 1;"></div>
-      <div class="nav-item" id="manageFoldersBtn" title="Settings">
+      <div class="sidebar-spacer"></div>
+      <div class="nav-item" id="manageFoldersBtn" title="Settings" role="button" tabindex="0">
         <i>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
@@ -85,31 +86,54 @@
         </div>
 
         <div class="map-mode-wrap hidden" id="mapModeWrap">
-          <div class="map-mode-meta" id="mapModeMeta">0 places · 0 items</div>
+          <div class="map-mode-meta" id="mapModeMeta">0 Places · 0 Items</div>
           <div class="custom-dropdown" id="mapStyleDropdown">
-            <div class="dropdown-trigger">
+            <div class="dropdown-trigger" role="combobox" tabindex="0" aria-haspopup="listbox" aria-expanded="false"
+              aria-label="Map style">
               <span class="dropdown-label">Voyager</span>
-              <i class="dropdown-arrow">▾</i>
+              <i class="dropdown-arrow" aria-hidden="true">▾</i>
             </div>
-            <div class="dropdown-menu">
-              <div class="dropdown-item active" data-value="voyager">Voyager</div>
-              <div class="dropdown-item" data-value="positron">Positron</div>
-              <div class="dropdown-item" data-value="darkmatter">Dark Matter</div>
+            <div class="dropdown-menu" role="listbox" aria-label="Map styles">
+              <div class="dropdown-item active" data-value="voyager" role="option" aria-selected="true">Voyager</div>
+              <div class="dropdown-item" data-value="positron" role="option" aria-selected="false">Positron</div>
+              <div class="dropdown-item" data-value="darkmatter" role="option" aria-selected="false">Dark Matter</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="people-mode-wrap hidden" id="peopleModeWrap">
+          <div class="people-mode-meta" id="peopleModeMeta">
+            <span class="people-count" id="peopleCount">0 People</span>
+            <span class="people-sep">·</span>
+            <span class="people-unnamed" id="peopleUnnamed">0 Unnamed</span>
+          </div>
+          <div class="custom-dropdown" id="peopleSortDropdown">
+            <div class="dropdown-trigger" role="combobox" tabindex="0" aria-haspopup="listbox" aria-expanded="false"
+              aria-label="Sort people by">
+              <span class="dropdown-label">Most Photos</span>
+              <i class="dropdown-arrow" aria-hidden="true">▾</i>
+            </div>
+            <div class="dropdown-menu" role="listbox" aria-label="Sort order">
+              <div class="dropdown-item active" data-value="photos" role="option" aria-selected="true">Most Photos</div>
+              <div class="dropdown-item" data-value="name" role="option" aria-selected="false">Name (A–Z)</div>
+              <div class="dropdown-item" data-value="recent" role="option" aria-selected="false">Recently Updated</div>
+              <div class="dropdown-item" data-value="unnamed" role="option" aria-selected="false">Unnamed First</div>
             </div>
           </div>
         </div>
 
         <div class="groupBy-wrap">
           <div class="custom-dropdown" id="groupByDropdown">
-            <div class="dropdown-trigger">
+            <div class="dropdown-trigger" role="combobox" tabindex="0" aria-haspopup="listbox" aria-expanded="false"
+              aria-label="Group by">
               <span class="dropdown-label">⏱ Chrono</span>
-              <i class="dropdown-arrow">▾</i>
+              <i class="dropdown-arrow" aria-hidden="true">▾</i>
             </div>
-            <div class="dropdown-menu">
-              <div class="dropdown-item active" data-value="date">⏱ Chrono</div>
-              <div class="dropdown-item" data-value="tag">◈ Subjects</div>
-              <div class="dropdown-item" data-value="person">⊚ Identities</div>
-              <div class="dropdown-item" data-value="location">📍 Places</div>
+            <div class="dropdown-menu" role="listbox" aria-label="Grouping modes">
+              <div class="dropdown-item active" data-value="date" role="option" aria-selected="true">⏱ Chrono</div>
+              <div class="dropdown-item" data-value="tag" role="option" aria-selected="false">◈ Subjects</div>
+              <div class="dropdown-item" data-value="person" role="option" aria-selected="false">⊚ Identities</div>
+              <div class="dropdown-item" data-value="location" role="option" aria-selected="false">📍 Places</div>
             </div>
           </div>
         </div>
@@ -140,7 +164,52 @@
       <div id="main-content">
         <div id="viewport">
           <svg id="connections"></svg>
-          <div id="gallery"></div>
+          <div id="gallery">
+            <div id="loadingScreen" class="loading-screen">
+              <div class="loading-hero">
+                <div class="loading-orbit">
+                  <div class="loading-ring"></div>
+                  <div class="loading-ring loading-ring-2"></div>
+                  <div class="loading-icon">MG</div>
+                </div>
+                <h2 class="loading-title">Memory Gallery</h2>
+                <p class="loading-subtitle" id="loadingSubtitle">Preparing your memories...</p>
+              </div>
+              <div class="loading-phases" id="loadingPhases">
+                <div class="loading-phase" data-phase="scan">
+                  <div class="phase-indicator"></div>
+                  <span>Discovering files</span>
+                </div>
+                <div class="loading-phase" data-phase="metadata">
+                  <div class="phase-indicator"></div>
+                  <span>Reading metadata</span>
+                </div>
+                <div class="loading-phase" data-phase="ai">
+                  <div class="phase-indicator"></div>
+                  <span>AI analysis</span>
+                </div>
+                <div class="loading-phase" data-phase="faces">
+                  <div class="phase-indicator"></div>
+                  <span>Face recognition</span>
+                </div>
+                <div class="loading-phase" data-phase="vectors">
+                  <div class="phase-indicator"></div>
+                  <span>Search indexing</span>
+                </div>
+              </div>
+              <div class="loading-progress-wrap" id="loadingProgressWrap">
+                <div class="loading-progress-bar" id="loadingProgressBar"></div>
+              </div>
+              <p class="loading-detail" id="loadingDetail"></p>
+              <div class="loading-skeleton-row">
+                <div class="skeleton-node"></div>
+                <div class="skeleton-node"></div>
+                <div class="skeleton-node"></div>
+                <div class="skeleton-node"></div>
+                <div class="skeleton-node"></div>
+              </div>
+            </div>
+          </div>
           <button id="floatingRecenterBtn" class="floating-btn hidden">🎯 Recenter</button>
         </div>
         <div id="map-panel" class="hidden">
@@ -153,11 +222,18 @@
     <div id="settingsModal" class="modal-overlay hidden">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>Manage Folders</h3>
-          <button id="closeSettingsBtn" class="icon-btn">✖</button>
+          <h3>Settings</h3>
+          <button id="closeSettingsBtn" class="icon-btn" aria-label="Close settings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
         <div class="modal-body">
-          <p>The app will scan these folders for photos and videos:</p>
+          <p class="section-label">Library Folders</p>
+          <p>Photos and videos in these folders will be indexed:</p>
           <div id="rootsList" class="roots-list"></div>
           <button id="addFolderBtn" class="accent-btn">+ Add Folder</button>
           <div class="settings-options">
@@ -167,8 +243,36 @@
             </label>
           </div>
           <div class="settings-actions">
-            <button id="refreshLibraryBtn" class="filter-chip">🔄 Refresh Library</button>
-            <button id="clearCacheActionBtn" class="filter-chip danger">🗑️ Clear Cache</button>
+            <button id="refreshLibraryBtn" class="settings-action-btn" title="Scan folders and update your library">
+              <span class="action-btn-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+              </span>
+              <span class="action-btn-text">
+                <strong>Refresh Library</strong>
+                <small>Re-scan folders for new or changed files</small>
+              </span>
+            </button>
+            <button id="clearCacheActionBtn" class="settings-action-btn danger"
+              title="Wipe all indexed data and close the app">
+              <span class="action-btn-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </span>
+              <span class="action-btn-text">
+                <strong>Clear Cache & Quit</strong>
+                <small>Wipe all indexed data and close the app</small>
+              </span>
+            </button>
           </div>
         </div>
         <div class="modal-footer">
@@ -183,7 +287,13 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>Rename Identity</h3>
-        <button id="closeRenameBtn" class="icon-btn">✖</button>
+        <button id="closeRenameBtn" class="icon-btn" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
       <div class="modal-body">
         <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Enter a new name for this
@@ -197,7 +307,7 @@
       </div>
     </div>
   </div>
-  <script src="src/renderer/app.js"></script>
+  <script type="module" src="src/renderer/app.js"></script>
 </body>
 
 </html>

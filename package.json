@@ -7,10 +7,19 @@
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "test": "node test/basic.test.js",
+    "lint": "npx eslint . --ext .js --max-warnings 0",
+    "format": "npx prettier --write \"src/**/*.{js,css,html}\" \"lib/**/*.js\"",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
-  "keywords": ["electron", "photo-gallery", "ai", "clip", "face-recognition", "semantic-search"],
+  "keywords": [
+    "electron",
+    "photo-gallery",
+    "ai",
+    "clip",
+    "face-recognition",
+    "semantic-search"
+  ],
   "author": "Vishal",
   "license": "ISC",
   "type": "commonjs",
@@ -49,6 +58,13 @@
       "category": "public.app-category.photography",
       "darkModeSupport": true
     },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics;Photography"
+    },
     "nsis": {
       "oneClick": true,
       "allowToChangeInstallationDirectory": false,
@@ -58,8 +74,16 @@
     },
     "dmg": {
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "asar": true,

@@ -1,16 +1,36 @@
 const { ipcMain } = require('electron');
+const fs = require('fs');
+const path = require('path');
 const { runIndexing, getEventsForRenderer, getIndexStats } = require('../../lib/indexer');
 const { searchSemanticVectors } = require('../../lib/indexer/vector-search');
 
 function registerIpcHandlers({ app, db, refreshManager, getLatestRunStats, setLatestRunStats }) {
   ipcMain.handle('read-images', async (e, config = {}) => {
-    return getEventsForRenderer(db, config.groupBy || 'date');
+    const clusters = getEventsForRenderer(db, config.groupBy || 'date');
+    const stats = getIndexStats(db);
+    return {
+      clusters,
+      indexDebug: {
+        ...stats,
+        latestRun: getLatestRunStats(),
+        libraryDirty: refreshManager.isDirty(),
+      },
+    };
   });
 
   ipcMain.handle('refresh-library', async (e, config = {}) => {
     const latestRun = await refreshManager.requestRefresh('manual');
     setLatestRunStats(latestRun);
-    return getEventsForRenderer(db, config.groupBy || 'date');
+    const clusters = getEventsForRenderer(db, config.groupBy || 'date');
+    const stats = getIndexStats(db);
+    return {
+      clusters,
+      indexDebug: {
+        ...stats,
+        latestRun: getLatestRunStats(),
+        libraryDirty: refreshManager.isDirty(),
+      },
+    };
   });
 
   ipcMain.handle('get-events', async (e, config = {}) => {
@@ -34,21 +54,35 @@ function registerIpcHandlers({ app, db, refreshManager, getLatestRunStats, setLa
     try {
       console.log('Clearing cache via SQL...');
       const tx = db.transaction(() => {
+        db.prepare('DELETE FROM media_faces').run();
+        db.prepare('DELETE FROM people').run();
         db.prepare('DELETE FROM event_items').run();
         db.prepare('DELETE FROM events').run();
         db.prepare('DELETE FROM media_items').run();
         db.prepare('DELETE FROM geocoding_cache').run();
-        // Option: db.prepare('DELETE FROM settings').run(); 
-        // We usually want to KEEP settings (folder roots) during a cache clear 
-        // so the user doesn't have to re-add their folders.
       });
       tx();
       console.log('Cache cleared successfully.');
     } catch (err) {
       console.error('Failed to clear cache via SQL:', err);
+      throw new Error(`Cache clear failed: ${err.message}`);
     }
-    app.relaunch();
-    app.exit();
+
+    // Clean on-disk thumbnail and analysis-cache directories
+    const userDataPath = app.getPath('userData');
+    for (const dirName of ['thumbnails', 'analysis-cache', 'faces']) {
+      const dir = path.join(userDataPath, dirName);
+      try {
+        if (fs.existsSync(dir)) {
+          fs.rmSync(dir, { recursive: true, force: true });
+          console.log(`Removed ${dirName} directory.`);
+        }
+      } catch (fsErr) {
+        console.warn(`Could not remove ${dirName}:`, fsErr.message);
+      }
+    }
+
+    app.quit();
   });
 
   ipcMain.handle('get-index-roots', async () => {

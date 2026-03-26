@@ -28,6 +28,11 @@ const ALLOWED_RECEIVE_CHANNELS = new Set([
   'semantic-indexing-started',
   'semantic-indexing-progress',
   'semantic-indexing-complete',
+  'metadata-processing-started',
+  'metadata-batch-progress',
+  'metadata-batch-ready',
+  'metadata-processing-complete',
+  'model-load-error',
 ]);
 
 const ALLOWED_SEND_CHANNELS = new Set([

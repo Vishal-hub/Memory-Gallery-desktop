@@ -1,12 +1,18 @@
 const path = require('path');
-const { app } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const { createDb } = require('../../lib/indexer');
 const { createMainWindow } = require('./window');
 const { registerIpcHandlers } = require('./ipc');
 const { createLibraryRefreshManager } = require('./library-refresh');
-const { warmVisionModels } = require('../../lib/indexer/model-registry');
+const { warmVisionModels, warmFaceModels } = require('../../lib/indexer/model-registry');
 
 let latestRunStats = null;
+
+function broadcastToAll(channel, payload) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  });
+}
 
 function configureChromiumCachePaths() {
   const userDataPath = app.getPath('userData');
@@ -43,6 +49,17 @@ function startApp() {
     setTimeout(() => {
       warmVisionModels().catch((error) => {
         console.error('[Models] Vision warmup failed:', error);
+        broadcastToAll('model-load-error', {
+          message: error.message || 'AI models failed to load',
+          hint: 'AI features (tagging, search, face recognition) are unavailable. Check your internet connection and restart the app.',
+        });
+      });
+      warmFaceModels().catch((error) => {
+        console.error('[Models] Face model warmup failed:', error);
+        broadcastToAll('model-load-error', {
+          message: error.message || 'Face recognition models failed to load',
+          hint: 'Face recognition will fall back to basic detection. Check your internet connection and restart the app.',
+        });
       });
     }, 300);
     refreshManager.startWatching();

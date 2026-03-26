@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { BrowserWindow } = require('electron');
 const { runIndexing } = require('../../lib/indexer');
-const { processPendingVisualJobs, processPendingFaceJobs, processPendingEmbeddingJobs } = require('../../lib/indexer/index-service');
+const { processMetadataBatches, processPendingVisualJobs, processPendingFaceJobs, processPendingEmbeddingJobs, createStreamingFaceQueue } = require('../../lib/indexer/index-service');
 const { getMediaRoots, walkMediaFiles, getMediaFileRecord } = require('../../lib/indexer/scanner');
 const { buildEvents } = require('../../lib/indexer/cluster');
 const { getActiveMediaItems, replaceEvents, deleteMediaItemsByPaths } = require('../../lib/indexer/repository');
@@ -46,7 +46,7 @@ async function withReducedPriority(task) {
   try {
     previousPriority = os.getPriority(process.pid);
     os.setPriority(process.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
-  } catch (_) {}
+  } catch (_) { }
 
   try {
     return await task();
@@ -54,7 +54,7 @@ async function withReducedPriority(task) {
     if (previousPriority != null) {
       try {
         os.setPriority(process.pid, previousPriority);
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 }
@@ -97,32 +97,31 @@ function createLibraryRefreshManager({ app, db, setLatestRunStats }) {
     }
   }
 
-  async function runRefresh(reason = 'manual') {
+  async function runRefresh(reason = 'manual', { scannedFiles = null } = {}) {
     try {
       libraryDirty = false;
       const isInitialLibraryBuild = getActiveMediaItems(db).length === 0;
-      const { latestRun, pendingVisualJobs, pendingFaceJobs, pendingEmbeddingJobs } = await runIndexing(db, app, {
+
+      // ---- Stage A: Quick-insert (returns in ~1-3s) ----
+      const quickResult = await runIndexing(db, app, {
         deferVisualIndexing: true,
         deferFaceIndexing: true,
         deferSemanticEmbedding: true,
+        scannedFiles,
+        quickInsertOnly: true,
       });
-      setLatestRunStats(latestRun);
-      console.log(`[Indexer] Timings ms: scan=${latestRun.timingsMs.scan} process=${latestRun.timingsMs.process} rebuild=${latestRun.timingsMs.rebuild} total=${latestRun.timingsMs.total} batch=${latestRun.batchSize} toProcess=${latestRun.toProcessCount}`);
-      broadcast('library-refresh-complete', { reason, latestRun, libraryDirty });
-      if (pendingVisualJobs.length > 0) {
-        startVisualQueue(pendingVisualJobs, pendingFaceJobs, pendingEmbeddingJobs, {
-          politeBackground: !isInitialLibraryBuild,
-        });
-      } else if (pendingFaceJobs.length > 0) {
-        startFaceQueue(pendingFaceJobs, pendingEmbeddingJobs, {
-          politeBackground: !isInitialLibraryBuild,
-        });
-      } else if (pendingEmbeddingJobs.length > 0) {
-        startEmbeddingQueue(pendingEmbeddingJobs, {
-          politeBackground: !isInitialLibraryBuild,
-        });
-      }
-      return latestRun;
+      setLatestRunStats(quickResult.latestRun);
+      console.log(`[Indexer] Stage A (quick-insert): ${quickResult.latestRun.scannedCount} files, ${quickResult.latestRun.timingsMs.total}ms`);
+      broadcast('library-refresh-complete', { reason, latestRun: quickResult.latestRun, libraryDirty });
+
+      // ---- Stage B: Background metadata + parallel pipeline (fire-and-forget) ----
+      const backgroundScannedFiles = quickResult.scannedFiles || scannedFiles;
+      startBackgroundProcessing(backgroundScannedFiles, isInitialLibraryBuild, reason).catch((err) => {
+        console.error('[Pipeline] Background processing error:', err);
+        broadcast('library-refresh-error', { reason, message: err.message || 'Background processing error' });
+      });
+
+      return quickResult.latestRun;
     } catch (error) {
       broadcast('library-refresh-error', {
         reason,
@@ -132,13 +131,46 @@ function createLibraryRefreshManager({ app, db, setLatestRunStats }) {
     }
   }
 
-  async function requestRefresh(reason = 'manual') {
+  async function startBackgroundProcessing(scannedFiles, isInitialLibraryBuild, reason) {
+    const polite = !isInitialLibraryBuild;
+    const runtimeOpts = getQueueRuntimeOptions(polite, waitForInteractionIdle);
+    const yieldMs = polite ? Math.max(runtimeOpts.yieldMs, 30) : 0;
+    const batchSize = isInitialLibraryBuild ? 100 : 50;
+
+    broadcast('metadata-processing-started', { total: 0 });
+    const metadataResult = await withReducedPriority(() =>
+      processMetadataBatches(db, app, scannedFiles, {
+        batchSize,
+        yieldMs,
+        beforeBatch: polite ? waitForInteractionIdle : null,
+        onProgress: (data) => {
+          broadcast('metadata-batch-progress', data);
+        },
+        onRefresh: (data) => {
+          broadcast('metadata-batch-ready', data);
+        },
+      })
+    );
+
+    console.log(`[Indexer] Stage B (metadata): ${metadataResult.latestRun.toProcessCount} files in ${metadataResult.latestRun.timingsMs.total}ms`);
+    broadcast('metadata-processing-complete', metadataResult.latestRun);
+
+    const { pendingVisualJobs, pendingFaceJobs, pendingEmbeddingJobs } = metadataResult;
+    const hasWork = pendingVisualJobs.length > 0 || pendingFaceJobs.length > 0 || pendingEmbeddingJobs.length > 0;
+    if (hasWork) {
+      await startParallelPipeline(pendingVisualJobs, pendingFaceJobs, pendingEmbeddingJobs, {
+        politeBackground: polite,
+      });
+    }
+  }
+
+  async function requestRefresh(reason = 'manual', options = {}) {
     if (refreshInFlight) {
       queuedReason = queuedReason || reason;
       return refreshInFlight;
     }
 
-    refreshInFlight = runRefresh(reason)
+    refreshInFlight = runRefresh(reason, options)
       .finally(async () => {
         refreshInFlight = null;
         if (queuedReason) {
@@ -189,17 +221,12 @@ function createLibraryRefreshManager({ app, db, setLatestRunStats }) {
       incremental: true,
     });
 
-    if (result.pendingVisualJobs.length > 0) {
-      startVisualQueue(result.pendingVisualJobs, result.pendingFaceJobs, result.pendingEmbeddingJobs, {
+    const hasWork = result.pendingVisualJobs.length > 0 || result.pendingFaceJobs.length > 0 || result.pendingEmbeddingJobs.length > 0;
+    if (hasWork) {
+      startParallelPipeline(result.pendingVisualJobs, result.pendingFaceJobs, result.pendingEmbeddingJobs, {
         politeBackground: true,
-      });
-    } else if (result.pendingFaceJobs.length > 0) {
-      startFaceQueue(result.pendingFaceJobs, result.pendingEmbeddingJobs, {
-        politeBackground: true,
-      });
-    } else if (result.pendingEmbeddingJobs.length > 0) {
-      startEmbeddingQueue(result.pendingEmbeddingJobs, {
-        politeBackground: true,
+      }).catch((err) => {
+        console.error('[Pipeline] Incremental pipeline error:', err);
       });
     }
 
@@ -289,33 +316,98 @@ function createLibraryRefreshManager({ app, db, setLatestRunStats }) {
     return refreshInFlight;
   }
 
-  async function startVisualQueue(jobs, existingFaceJobs = [], pendingEmbeddingJobs = [], options = {}) {
-    if (visualQueueInFlight) return visualQueueInFlight;
-    visualQueueInFlight = (async () => {
-      const runtime = getQueueRuntimeOptions(options.politeBackground !== false, waitForVisualQueueWindow);
-      broadcast('visual-indexing-started', { total: jobs.length });
-      const result = await withReducedPriority(() => processPendingVisualJobs(db, jobs, Object.assign({
+  async function startParallelPipeline(visualJobs, existingFaceJobs = [], embeddingJobs = [], options = {}) {
+    const polite = options.politeBackground !== false;
+    const visualRuntime = getQueueRuntimeOptions(polite, waitForVisualQueueWindow);
+    const faceRuntime = getQueueRuntimeOptions(polite, waitForInteractionIdle);
+    const embeddingRuntime = getQueueRuntimeOptions(polite, waitForInteractionIdle);
+
+    const promises = [];
+
+    // --- Streaming face queue: receives jobs from both existingFaceJobs
+    //     and new discoveries from the visual pipeline in real-time. ---
+    const hasFaceWork = existingFaceJobs.length > 0 || visualJobs.length > 0;
+    let streamingFace = null;
+
+    if (hasFaceWork) {
+      let faceStartBroadcast = false;
+      streamingFace = createStreamingFaceQueue(db, Object.assign({
+        onProgress: (data) => {
+          if (!faceStartBroadcast) {
+            faceStartBroadcast = true;
+            broadcast('face-indexing-started', { total: data.total });
+          }
+          broadcast('face-indexing-progress', data);
+        },
+      }, faceRuntime.beforeBatch ? { beforeBatch: waitForInteractionIdle } : {}, {
+        yieldMs: faceRuntime.yieldMs,
+      }));
+      if (existingFaceJobs.length > 0) {
+        broadcast('face-indexing-started', { total: existingFaceJobs.length });
+        faceStartBroadcast = true;
+      }
+      for (const job of existingFaceJobs) streamingFace.push(job);
+
+      faceQueueInFlight = withReducedPriority(() => streamingFace.waitUntilDone())
+        .then((result) => {
+          console.log(`[FaceIndex] Completed ${result.total} jobs in ${result.durationMs}ms`);
+          broadcast('face-indexing-complete', result);
+        })
+        .finally(() => { faceQueueInFlight = null; });
+      promises.push(faceQueueInFlight);
+    }
+
+    // --- Visual queue: runs DETR detection, streams discovered face jobs
+    //     into the streaming face queue as each batch completes. ---
+    if (visualJobs.length > 0) {
+      broadcast('visual-indexing-started', { total: visualJobs.length });
+      visualQueueInFlight = withReducedPriority(() => processPendingVisualJobs(db, visualJobs, Object.assign({
         onProgress: (data) => {
           broadcast('visual-indexing-progress', data);
         },
-      }, runtime.beforeBatch ? { beforeBatch: waitForVisualQueueWindow } : {}, {
-        yieldMs: runtime.yieldMs,
-      })));
-      console.log(`[VisualIndex] Completed ${result.total} jobs in ${result.durationMs}ms`);
-      broadcast('visual-indexing-complete', result);
-      const combinedFaceJobs = [...(existingFaceJobs || []), ...(result.pendingFaceJobs || [])];
-      if (combinedFaceJobs.length > 0) {
-        await startFaceQueue(combinedFaceJobs, pendingEmbeddingJobs, options);
-      } else if (pendingEmbeddingJobs.length > 0) {
-        await startEmbeddingQueue(pendingEmbeddingJobs, options);
-      }
-    })().finally(() => {
-      visualQueueInFlight = null;
-    });
-    return visualQueueInFlight;
+        onFaceJob: streamingFace
+          ? (job) => streamingFace.push(job)
+          : null,
+      }, visualRuntime.beforeBatch ? { beforeBatch: waitForVisualQueueWindow } : {}, {
+        yieldMs: visualRuntime.yieldMs,
+      })))
+        .then((result) => {
+          console.log(`[VisualIndex] Completed ${result.total} jobs in ${result.durationMs}ms`);
+          broadcast('visual-indexing-complete', result);
+          if (streamingFace) streamingFace.markProducerDone();
+
+          if (!streamingFace && result.pendingFaceJobs?.length > 0) {
+            return startLegacyFaceQueue(result.pendingFaceJobs, options);
+          }
+        })
+        .finally(() => { visualQueueInFlight = null; });
+      promises.push(visualQueueInFlight);
+    } else if (streamingFace) {
+      streamingFace.markProducerDone();
+    }
+
+    // --- Embedding queue: completely independent, runs in parallel. ---
+    if (embeddingJobs.length > 0) {
+      broadcast('semantic-indexing-started', { total: embeddingJobs.length });
+      embeddingQueueInFlight = withReducedPriority(() => processPendingEmbeddingJobs(db, embeddingJobs, Object.assign({
+        onProgress: (data) => {
+          broadcast('semantic-indexing-progress', data);
+        },
+      }, embeddingRuntime.beforeBatch ? { beforeBatch: waitForInteractionIdle } : {}, {
+        yieldMs: embeddingRuntime.yieldMs,
+      })))
+        .then((result) => {
+          console.log(`[SemanticIndex] Completed ${result.total} jobs in ${result.durationMs}ms`);
+          broadcast('semantic-indexing-complete', result);
+        })
+        .finally(() => { embeddingQueueInFlight = null; });
+      promises.push(embeddingQueueInFlight);
+    }
+
+    await Promise.all(promises);
   }
 
-  async function startFaceQueue(jobs, pendingEmbeddingJobs = [], options = {}) {
+  async function startLegacyFaceQueue(jobs, options = {}) {
     if (faceQueueInFlight) return faceQueueInFlight;
     faceQueueInFlight = (async () => {
       const runtime = getQueueRuntimeOptions(options.politeBackground !== false, waitForInteractionIdle);
@@ -329,38 +421,15 @@ function createLibraryRefreshManager({ app, db, setLatestRunStats }) {
       })));
       console.log(`[FaceIndex] Completed ${result.total} jobs in ${result.durationMs}ms`);
       broadcast('face-indexing-complete', result);
-      if (pendingEmbeddingJobs.length > 0) {
-        await startEmbeddingQueue(pendingEmbeddingJobs, options);
-      }
     })().finally(() => {
       faceQueueInFlight = null;
     });
     return faceQueueInFlight;
   }
 
-  async function startEmbeddingQueue(jobs, options = {}) {
-    if (embeddingQueueInFlight) return embeddingQueueInFlight;
-    embeddingQueueInFlight = (async () => {
-      const runtime = getQueueRuntimeOptions(options.politeBackground !== false, waitForInteractionIdle);
-      broadcast('semantic-indexing-started', { total: jobs.length });
-      const result = await withReducedPriority(() => processPendingEmbeddingJobs(db, jobs, Object.assign({
-        onProgress: (data) => {
-          broadcast('semantic-indexing-progress', data);
-        },
-      }, runtime.beforeBatch ? { beforeBatch: waitForInteractionIdle } : {}, {
-        yieldMs: runtime.yieldMs,
-      })));
-      console.log(`[SemanticIndex] Completed ${result.total} jobs in ${result.durationMs}ms`);
-      broadcast('semantic-indexing-complete', result);
-    })().finally(() => {
-      embeddingQueueInFlight = null;
-    });
-    return embeddingQueueInFlight;
-  }
-
   function clearWatchers() {
     watchers.forEach((watcher) => {
-      try { watcher.close(); } catch (_) {}
+      try { watcher.close(); } catch (_) { }
     });
     watchers = [];
   }
@@ -459,6 +528,15 @@ function createLibraryRefreshManager({ app, db, setLatestRunStats }) {
       if (changedPaths.length > 0) {
         await requestIncrementalRefresh(changedPaths, 'startup-scan');
       }
+    }
+
+    const pendingFaceCount = db.prepare(
+      "SELECT COUNT(*) as count FROM media_items WHERE is_missing = 0 AND media_type = 'image' AND faces_indexed = 0 AND visual_indexed = 1"
+    ).get().count;
+    if (pendingFaceCount > 0 && !changed) {
+      console.log(`[LibraryRefresh] ${pendingFaceCount} images need face re-indexing, triggering full refresh...`);
+      await requestRefresh('face-reindex', { scannedFiles: scanned });
+      changed = true;
     }
 
     return {
