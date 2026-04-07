@@ -1434,6 +1434,8 @@ function bindInteractions() {
   // Navigation tabs
   onActivate(ui.navTimeline, async () => {
     const token = ++state.navigationToken;
+    state.searchQuery = '';
+    if (ui.searchInput) ui.searchInput.value = '';
     hidePeopleToolbar();
     closeFamilyTree();
     if (ui.timelineWrap) ui.timelineWrap.classList.remove('hidden');
@@ -1540,7 +1542,7 @@ function bindInteractions() {
     try {
       const settings = await window.api.invoke('get-index-roots');
       state.indexRoots = Array.isArray(settings) ? settings : (settings?.roots || []);
-      ui.includeVideosCheckbox.checked = settings.includeVideos !== false;
+      ui.includeVideosCheckbox.checked = settings.includeVideos === true;
       try {
         const gpuSafe = await window.api.invoke('get-gpu-safe-mode');
         if (ui.gpuSafeModeCheckbox) ui.gpuSafeModeCheckbox.checked = gpuSafe;

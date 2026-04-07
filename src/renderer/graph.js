@@ -222,6 +222,7 @@ export function setGraphTransformEnabled(enabled) {
     } else {
         ui.gallery.style.transform = 'none';
         ui.connections.style.transform = 'none';
+        if (ui.floatingRecenterBtn) ui.floatingRecenterBtn.classList.add('hidden');
     }
 }
 
@@ -590,6 +591,7 @@ function syncVisibleClusters(force = false) {
 }
 
 export function renderClusters(clusters, options = {}) {
+    resetViewportContext();
     ++_renderGen;
     state.filteredClusters = clusters;
     state.fullClusterPositions = [];

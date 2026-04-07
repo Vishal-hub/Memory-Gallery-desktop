@@ -100,7 +100,8 @@ export function renderSearchResults(items) {
     _lastTimelineRenderSignature = '';
     state.inDetailsView = true;
     setGraphTransformEnabled(false);
-    ui.viewport.style.overflow = 'auto';
+    ui.viewport.classList.add('scrollable-mode');
+    ui.viewport.classList.remove('dragging');
     ui.viewport.style.cursor = 'default';
     ui.connections.innerHTML = '';
     ui.gallery.innerHTML = '';
